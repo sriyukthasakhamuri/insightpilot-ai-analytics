@@ -4,9 +4,9 @@ from langchain_ollama import ChatOllama
 from langgraph.graph import END, StateGraph
 
 from app.agents.customer_risk_tools import (
+    get_risk_summary,
     get_top_risk_customers,
 )
-
 
 class AgentState(TypedDict):
     question: str
@@ -28,6 +28,7 @@ def analyze_question(
     customers = get_top_risk_customers(
         limit=5
     )
+    risk_summary = get_risk_summary()
 
     customer_context = "\n".join(
         [
@@ -43,21 +44,32 @@ def analyze_question(
     prompt = f"""
 You are InsightPilot, an AI analytics assistant.
 
-Your job is to answer business questions using only the
-customer risk data provided below.
+Answer the user's business question using only the
+customer risk information provided below.
 
-Do not invent customer IDs, probabilities, or business facts.
+Do not invent customer IDs, percentages, counts,
+probabilities, or business facts.
 
-Customer risk data:
+Overall risk summary:
+Total customers: {risk_summary['total_customers']}
+Critical-risk customers: {risk_summary['critical_customers']}
+High-risk customers: {risk_summary['high_customers']}
+Medium-risk customers: {risk_summary['medium_customers']}
+Low-risk customers: {risk_summary['low_customers']}
+High or Critical customers: {risk_summary['high_or_critical_customers']}
+High or Critical percentage: {risk_summary['high_or_critical_pct']}%
+Average churn probability: {risk_summary['average_churn_probability_pct']}%
+
+Top five highest-risk customers:
 {customer_context}
 
 User question:
 {question}
 
-If the data is insufficient to answer the question,
-say that clearly.
+If the available data is insufficient to answer the question,
+say so clearly.
 
-Provide a concise business-friendly answer.
+Use concise, business-friendly language.
 """
 
     response = llm.invoke(
@@ -97,8 +109,8 @@ def main():
     result = agent.invoke(
         {
             "question": (
-                "Who are the highest-risk customers "
-                "and what should the business focus on?"
+                "How many customers are high or critical risk, "
+                "and what percentage of our customer base is that?"
             ),
             "answer": "",
         }

@@ -6,3 +6,4 @@ fastapi
 uvicorn
 langgraph
 langchain-core
+langchain-ollama

@@ -1,5 +1,6 @@
 from typing import TypedDict
 
+from langchain_ollama import ChatOllama
 from langgraph.graph import END, StateGraph
 
 from app.agents.customer_risk_tools import (
@@ -12,41 +13,58 @@ class AgentState(TypedDict):
     answer: str
 
 
+llm = ChatOllama(
+    model="llama3.2:3b",
+    temperature=0,
+)
+
+
 def analyze_question(
     state: AgentState,
 ) -> AgentState:
-    question = state["question"].lower()
 
-    if (
-        "highest-risk" in question
-        or "highest risk" in question
-        or "top risk" in question
-        or "top churn" in question
-    ):
-        customers = get_top_risk_customers(
-            limit=5
-        )
+    question = state["question"]
 
-        lines = [
-            "Top 5 highest-risk customers:"
-        ]
+    customers = get_top_risk_customers(
+        limit=5
+    )
 
-        for customer in customers:
-            lines.append(
-                f"- {customer['customer_id']}: "
-                f"{customer['churn_probability_pct']}% "
-                f"({customer['risk_tier']})"
+    customer_context = "\n".join(
+        [
+            (
+                f"{customer['customer_id']} | "
+                f"{customer['churn_probability_pct']}% | "
+                f"{customer['risk_tier']}"
             )
+            for customer in customers
+        ]
+    )
 
-        state["answer"] = "\n".join(
-            lines
-        )
+    prompt = f"""
+You are InsightPilot, an AI analytics assistant.
 
-    else:
-        state["answer"] = (
-            "I can currently answer questions "
-            "about highest-risk customers."
-        )
+Your job is to answer business questions using only the
+customer risk data provided below.
+
+Do not invent customer IDs, probabilities, or business facts.
+
+Customer risk data:
+{customer_context}
+
+User question:
+{question}
+
+If the data is insufficient to answer the question,
+say that clearly.
+
+Provide a concise business-friendly answer.
+"""
+
+    response = llm.invoke(
+        prompt
+    )
+
+    state["answer"] = response.content
 
     return state
 
@@ -74,20 +92,20 @@ def build_graph():
 
 
 def main():
-    app = build_graph()
+    agent = build_graph()
 
-    result = app.invoke(
+    result = agent.invoke(
         {
             "question": (
-                "Who are the highest-risk "
-                "customers?"
+                "Who are the highest-risk customers "
+                "and what should the business focus on?"
             ),
             "answer": "",
         }
     )
 
     print(
-        "\nINSIGHTPILOT RESPONSE\n"
+        "\nINSIGHTPILOT AI RESPONSE\n"
     )
 
     print(

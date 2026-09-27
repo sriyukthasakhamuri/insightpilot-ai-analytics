@@ -12,6 +12,10 @@ from app.agents.segment_analysis_tools import (
     analyze_segment,
 )
 
+from app.rag.retrieval_service import (
+    retrieve_documents,
+)
+
 
 class AgentState(TypedDict):
     question: str
@@ -30,9 +34,9 @@ def analyze_question(
 
     question = state["question"]
 
-    # -----------------------------------------
-    # 1. Overall customer risk information
-    # -----------------------------------------
+    # =====================================================
+    # 1. CUSTOMER RISK ANALYTICS
+    # =====================================================
 
     customers = get_top_risk_customers(
         limit=5
@@ -40,9 +44,20 @@ def analyze_question(
 
     risk_summary = get_risk_summary()
 
-    # -----------------------------------------
-    # 2. Segment-level analysis
-    # -----------------------------------------
+    customer_context = "\n".join(
+        [
+            (
+                f"{customer['customer_id']} | "
+                f"{customer['churn_probability_pct']}% | "
+                f"{customer['risk_tier']}"
+            )
+            for customer in customers
+        ]
+    )
+
+    # =====================================================
+    # 2. SEGMENT ANALYTICS
+    # =====================================================
 
     contract_analysis = analyze_segment(
         "contract"
@@ -56,25 +71,6 @@ def analyze_question(
         "internet_type"
     )
 
-    # -----------------------------------------
-    # 3. Build customer context
-    # -----------------------------------------
-
-    customer_context = "\n".join(
-        [
-            (
-                f"{customer['customer_id']} | "
-                f"{customer['churn_probability_pct']}% | "
-                f"{customer['risk_tier']}"
-            )
-            for customer in customers
-        ]
-    )
-
-    # -----------------------------------------
-    # 4. Build segment context
-    # -----------------------------------------
-
     segment_context = f"""
 Contract analysis:
 {contract_analysis}
@@ -86,57 +82,129 @@ Internet type analysis:
 {internet_analysis}
 """
 
-    # -----------------------------------------
-    # 5. Prompt the LLM
-    # -----------------------------------------
+    # =====================================================
+    # 3. RAG DOCUMENT RETRIEVAL
+    # =====================================================
+
+    retrieved_documents = retrieve_documents(
+        query=question,
+        limit=3,
+    )
+
+    rag_sections = []
+
+    for document in retrieved_documents:
+
+        rag_sections.append(
+            (
+                f"SOURCE: {document['source']}\n"
+                f"SIMILARITY: {document['similarity']}\n"
+                f"{document['content']}"
+            )
+        )
+
+    rag_context = "\n\n".join(
+        rag_sections
+    )
+
+    source_names = [
+        document["source"]
+        for document in retrieved_documents
+    ]
+
+    # =====================================================
+    # 4. BUILD GROUNDED PROMPT
+    # =====================================================
 
     prompt = f"""
-You are InsightPilot, an AI analytics assistant.
+You are InsightPilot, an AI analytics and customer-retention assistant.
 
-Answer the user's business question using only the
-customer risk information provided below.
+Answer the user's question using only the information supplied below.
 
-Do not invent customer IDs, percentages, counts,
-probabilities, or business facts.
+You have three information sources:
 
-Overall risk summary:
+1. Customer churn analytics
+2. Customer segment analytics
+3. Retrieved business-policy documents
+
+Do not invent:
+- customer IDs
+- percentages
+- counts
+- probabilities
+- company policies
+- SLA requirements
+- business facts
+
+If the information provided is insufficient, say so clearly.
+
+Do not describe an association as proven causation.
+
+When the user asks which customer segment should be prioritized for
+retention, prioritize the segment with the highest churn risk or
+predicted churn rate unless the business-policy context states otherwise.
+
+When answering a policy question, base the answer primarily on the
+retrieved policy documents.
+
+--------------------------------------------------
+OVERALL CUSTOMER RISK SUMMARY
+--------------------------------------------------
+
 Total customers: {risk_summary['total_customers']}
 Critical-risk customers: {risk_summary['critical_customers']}
 High-risk customers: {risk_summary['high_customers']}
 Medium-risk customers: {risk_summary['medium_customers']}
 Low-risk customers: {risk_summary['low_customers']}
-High or Critical customers: {risk_summary['high_or_critical_customers']}
-High or Critical percentage: {risk_summary['high_or_critical_pct']}%
-Average churn probability: {risk_summary['average_churn_probability_pct']}%
 
-Top five highest-risk customers:
+High or Critical customers:
+{risk_summary['high_or_critical_customers']}
+
+High or Critical percentage:
+{risk_summary['high_or_critical_pct']}%
+
+Average churn probability:
+{risk_summary['average_churn_probability_pct']}%
+
+--------------------------------------------------
+TOP FIVE HIGHEST-RISK CUSTOMERS
+--------------------------------------------------
+
 {customer_context}
 
-Segment analysis:
+--------------------------------------------------
+SEGMENT ANALYSIS
+--------------------------------------------------
+
 {segment_context}
 
-User question:
+--------------------------------------------------
+RETRIEVED BUSINESS KNOWLEDGE
+--------------------------------------------------
+
+{rag_context}
+
+--------------------------------------------------
+USER QUESTION
+--------------------------------------------------
+
 {question}
 
-When the user asks which segment should be prioritized for retention,
-prioritize the segment with the highest churn risk or predicted churn rate,
-not the segment with the lowest risk.
+Provide a concise, business-friendly answer.
 
-Base recommendations on the numerical evidence provided.
+When business-policy documents are used, finish with:
 
-Clearly distinguish:
-- highest-risk segment
-- lower-risk comparison segments
-- recommended business focus
+Sources: <document names>
 
-Do not claim that a factor causes churn.
-Describe relationships as associations or model signals.
+Only list sources that were actually retrieved.
 
-If the available data is insufficient to answer the question,
-say so clearly.
-
-Use concise, business-friendly language.
+Retrieved source names:
+{source_names}
 """
+
+    # =====================================================
+    # 5. LLM RESPONSE
+    # =====================================================
 
     response = llm.invoke(
         prompt
@@ -177,8 +245,9 @@ def main():
     result = agent.invoke(
         {
             "question": (
-                "Which contract type should the "
-                "retention team prioritize and why?"
+                "What should we do for a "
+                "Critical-risk customer "
+                "according to policy?"
             ),
             "answer": "",
         }

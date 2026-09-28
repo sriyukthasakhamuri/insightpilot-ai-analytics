@@ -17,31 +17,56 @@ from app.rag.retrieval_service import (
 )
 
 
+# =========================================================
+# AGENT STATE
+# =========================================================
+
+
 class AgentState(TypedDict):
     question: str
     answer: str
     sources: list[str]
     route: str
 
+
+# =========================================================
+# OLLAMA MODEL
+# =========================================================
+
+
 llm = ChatOllama(
     model="llama3.2:3b",
     temperature=0,
 )
+
+
+# =========================================================
+# QUESTION ROUTER
+# =========================================================
+
+
 def route_question(
     state: AgentState,
 ) -> AgentState:
 
     question = state["question"].lower()
 
+    # ---------------------------------
+    # Policy indicators
+    # ---------------------------------
+
     policy_keywords = [
         "policy",
         "sla",
         "playbook",
-        "retention action",
-        "what should we do",
         "according to policy",
         "customer success",
+        "retention action",
     ]
+
+    # ---------------------------------
+    # Segment analytics indicators
+    # ---------------------------------
 
     segment_keywords = [
         "segment",
@@ -53,14 +78,18 @@ def route_question(
         "highest churn rate",
     ]
 
+    # ---------------------------------
+    # Customer analytics indicators
+    # ---------------------------------
+
     customer_keywords = [
-        "customer",
-        "customers",
-        "highest risk",
+        "highest-risk customers",
+        "highest risk customers",
         "top risk",
-        "critical risk",
+        "top customers",
         "churn probability",
         "risk tier",
+        "customer risk",
     ]
 
     has_policy = any(
@@ -78,8 +107,12 @@ def route_question(
         for keyword in customer_keywords
     )
 
+    # ---------------------------------
+    # Route decision
+    # ---------------------------------
+
     if has_policy and (
-        has_segment or has_customer
+        has_customer or has_segment
     ):
         route = "combined"
 
@@ -98,6 +131,13 @@ def route_question(
     state["route"] = route
 
     return state
+
+
+# =========================================================
+# ROUTE NODES
+# =========================================================
+
+
 def customer_route(
     state: AgentState,
 ) -> AgentState:
@@ -133,6 +173,12 @@ def combined_route(
 
     return state
 
+
+# =========================================================
+# CONDITIONAL ROUTE SELECTOR
+# =========================================================
+
+
 def choose_route(
     state: AgentState,
 ) -> str:
@@ -140,134 +186,64 @@ def choose_route(
     return state["route"]
 
 
+# =========================================================
+# MAIN ANALYSIS NODE
+# =========================================================
+
+
 def analyze_question(
     state: AgentState,
 ) -> AgentState:
 
     question = state["question"]
+    route = state["route"]
+
+    context_sections = []
+    source_names = []
 
     # =====================================================
     # 1. CUSTOMER RISK ANALYTICS
     # =====================================================
 
-    customers = get_top_risk_customers(
-        limit=5
-    )
+    if route in [
+        "customer",
+        "combined",
+    ]:
 
-    risk_summary = get_risk_summary()
-
-    customer_context = "\n".join(
-        [
-            (
-                f"{customer['customer_id']} | "
-                f"{customer['churn_probability_pct']}% | "
-                f"{customer['risk_tier']}"
-            )
-            for customer in customers
-        ]
-    )
-
-    # =====================================================
-    # 2. SEGMENT ANALYTICS
-    # =====================================================
-
-    contract_analysis = analyze_segment(
-        "contract"
-    )
-
-    payment_analysis = analyze_segment(
-        "payment_method"
-    )
-
-    internet_analysis = analyze_segment(
-        "internet_type"
-    )
-
-    segment_context = f"""
-Contract analysis:
-{contract_analysis}
-
-Payment method analysis:
-{payment_analysis}
-
-Internet type analysis:
-{internet_analysis}
-"""
-
-    # =====================================================
-    # 3. RAG DOCUMENT RETRIEVAL
-    # =====================================================
-
-    retrieved_documents = retrieve_documents(
-        query=question,
-        limit=3,
-    )
-
-    rag_sections = []
-
-    for document in retrieved_documents:
-
-        rag_sections.append(
-            (
-                f"SOURCE: {document['source']}\n"
-                f"SIMILARITY: {document['similarity']}\n"
-                f"{document['content']}"
-            )
+        customers = get_top_risk_customers(
+            limit=5
         )
 
-    rag_context = "\n\n".join(
-        rag_sections
-    )
+        risk_summary = get_risk_summary()
 
-    source_names = [
-        document["source"]
-        for document in retrieved_documents
-    ]
+        customer_context = "\n".join(
+            [
+                (
+                    f"{customer['customer_id']} | "
+                    f"{customer['churn_probability_pct']}% | "
+                    f"{customer['risk_tier']}"
+                )
+                for customer in customers
+            ]
+        )
 
-    # =====================================================
-    # 4. BUILD GROUNDED PROMPT
-    # =====================================================
-
-    prompt = f"""
-You are InsightPilot, an AI analytics and customer-retention assistant.
-
-Answer the user's question using only the information supplied below.
-
-You have three information sources:
-
-1. Customer churn analytics
-2. Customer segment analytics
-3. Retrieved business-policy documents
-
-Do not invent:
-- customer IDs
-- percentages
-- counts
-- probabilities
-- company policies
-- SLA requirements
-- business facts
-
-If the information provided is insufficient, say so clearly.
-
-Do not describe an association as proven causation.
-
-When the user asks which customer segment should be prioritized for
-retention, prioritize the segment with the highest churn risk or
-predicted churn rate unless the business-policy context states otherwise.
-
-When answering a policy question, base the answer primarily on the
-retrieved policy documents.
-
---------------------------------------------------
+        customer_section = f"""
 OVERALL CUSTOMER RISK SUMMARY
---------------------------------------------------
 
-Total customers: {risk_summary['total_customers']}
-Critical-risk customers: {risk_summary['critical_customers']}
-High-risk customers: {risk_summary['high_customers']}
-Medium-risk customers: {risk_summary['medium_customers']}
-Low-risk customers: {risk_summary['low_customers']}
+Total customers:
+{risk_summary['total_customers']}
+
+Critical-risk customers:
+{risk_summary['critical_customers']}
+
+High-risk customers:
+{risk_summary['high_customers']}
+
+Medium-risk customers:
+{risk_summary['medium_customers']}
+
+Low-risk customers:
+{risk_summary['low_customers']}
 
 High or Critical customers:
 {risk_summary['high_or_critical_customers']}
@@ -278,44 +254,164 @@ High or Critical percentage:
 Average churn probability:
 {risk_summary['average_churn_probability_pct']}%
 
---------------------------------------------------
 TOP FIVE HIGHEST-RISK CUSTOMERS
---------------------------------------------------
 
 {customer_context}
+"""
 
---------------------------------------------------
+        context_sections.append(
+            customer_section
+        )
+
+    # =====================================================
+    # 2. SEGMENT ANALYTICS
+    # =====================================================
+
+    if route in [
+        "segment",
+        "combined",
+    ]:
+
+        contract_analysis = analyze_segment(
+            "contract"
+        )
+
+        payment_analysis = analyze_segment(
+            "payment_method"
+        )
+
+        internet_analysis = analyze_segment(
+            "internet_type"
+        )
+
+        segment_section = f"""
 SEGMENT ANALYSIS
---------------------------------------------------
 
-{segment_context}
+Contract analysis:
+{contract_analysis}
 
---------------------------------------------------
+Payment method analysis:
+{payment_analysis}
+
+Internet type analysis:
+{internet_analysis}
+"""
+
+        context_sections.append(
+            segment_section
+        )
+
+    # =====================================================
+    # 3. POLICY / RAG RETRIEVAL
+    # =====================================================
+
+    if route in [
+        "policy",
+        "combined",
+    ]:
+
+        retrieved_documents = retrieve_documents(
+            query=question,
+            limit=3,
+        )
+
+        rag_sections = []
+
+        for document in retrieved_documents:
+
+            rag_sections.append(
+                (
+                    f"SOURCE: {document['source']}\n"
+                    f"SIMILARITY: "
+                    f"{document['similarity']}\n"
+                    f"{document['content']}"
+                )
+            )
+
+        rag_context = "\n\n".join(
+            rag_sections
+        )
+
+        source_names = [
+            document["source"]
+            for document in retrieved_documents
+        ]
+
+        policy_section = f"""
 RETRIEVED BUSINESS KNOWLEDGE
---------------------------------------------------
 
 {rag_context}
+"""
 
---------------------------------------------------
+        context_sections.append(
+            policy_section
+        )
+
+    # =====================================================
+    # 4. COMBINE ONLY REQUIRED CONTEXT
+    # =====================================================
+
+    combined_context = "\n\n".join(
+        context_sections
+    )
+
+    # =====================================================
+    # 5. GROUNDED PROMPT
+    # =====================================================
+
+    prompt = f"""
+You are InsightPilot, an AI analytics and
+customer-retention assistant.
+
+The user's question has been classified as:
+
+ROUTE: {route}
+
+Answer using only the information supplied
+in the context below.
+
+Do not invent:
+- customer IDs
+- percentages
+- counts
+- probabilities
+- policies
+- SLA requirements
+- business facts
+
+If the supplied information is insufficient,
+say so clearly.
+
+Do not describe model signals or associations
+as proven causes of churn.
+
+If the question asks about customer risk,
+use the supplied customer analytics.
+
+If the question asks about customer segments,
+use the supplied segment analytics.
+
+If the question asks about company policies,
+SLA requirements, or retention procedures,
+use only the retrieved business knowledge.
+
+For retention prioritization, prioritize higher
+churn risk or predicted churn rate unless the
+supplied business policy says otherwise.
+
+Keep the response concise and business-friendly.
+
+AVAILABLE CONTEXT
+
+{combined_context}
+
 USER QUESTION
---------------------------------------------------
 
 {question}
-
-Provide a concise, business-friendly answer.
-
-When business-policy documents are used, finish with:
-
-Sources: <document names>
-
-Only list sources that were actually retrieved.
-
-Retrieved source names:
-{source_names}
 """
 
     # =====================================================
-    # 5. LLM RESPONSE
+    # 6. GENERATE RESPONSE
     # =====================================================
 
     response = llm.invoke(
@@ -326,6 +422,11 @@ Retrieved source names:
     state["sources"] = source_names
 
     return state
+
+
+# =========================================================
+# BUILD LANGGRAPH
+# =========================================================
 
 
 def build_graph():
@@ -422,18 +523,26 @@ def build_graph():
 
     return graph.compile()
 
+
+# =========================================================
+# LOCAL TEST
+# =========================================================
+
+
 def main():
 
     agent = build_graph()
 
     result = agent.invoke(
         {
-            "question": (
-                "What should we do for a "
-                "Critical-risk customer "
-                "according to policy?"
+           "question": (
+              "What should we do for our "
+              "highest-risk customers "
+              "according to policy?"
             ),
             "answer": "",
+            "sources": [],
+            "route": "",
         }
     )
 
@@ -444,13 +553,22 @@ def main():
     print(
         result["answer"]
     )
+
     print(
-    "\nROUTE:"
-)
+        "\nROUTE:"
+    )
 
     print(
         result["route"]
-)
+    )
+
+    print(
+        "\nSOURCES:"
+    )
+
+    print(
+        result["sources"]
+    )
 
 
 if __name__ == "__main__":

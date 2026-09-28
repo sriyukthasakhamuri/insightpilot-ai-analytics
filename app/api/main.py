@@ -125,17 +125,22 @@ def ask_insightpilot(
 
     try:
         result = insightpilot_agent.invoke(
-            {
-                "question": question,
-                "answer": "",
-            }
-        )
+    {
+        "question": question,
+        "answer": "",
+        "sources": [],
+    }
+)
+        
 
         return {
-            "question": question,
-            "answer": result["answer"],
-        }
-
+         "question": question,
+         "answer": result["answer"],
+         "sources": result["sources"],
+         "source_count": len(
+        result["sources"]
+    ),
+}
     except Exception as exception:
         raise HTTPException(
             status_code=500,

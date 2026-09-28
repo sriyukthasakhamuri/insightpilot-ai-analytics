@@ -20,6 +20,7 @@ from app.rag.retrieval_service import (
 class AgentState(TypedDict):
     question: str
     answer: str
+    sources: list[str]
 
 
 llm = ChatOllama(
@@ -211,6 +212,7 @@ Retrieved source names:
     )
 
     state["answer"] = response.content
+    state["sources"] = source_names
 
     return state
 

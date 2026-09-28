@@ -21,12 +21,123 @@ class AgentState(TypedDict):
     question: str
     answer: str
     sources: list[str]
-
+    route: str
 
 llm = ChatOllama(
     model="llama3.2:3b",
     temperature=0,
 )
+def route_question(
+    state: AgentState,
+) -> AgentState:
+
+    question = state["question"].lower()
+
+    policy_keywords = [
+        "policy",
+        "sla",
+        "playbook",
+        "retention action",
+        "what should we do",
+        "according to policy",
+        "customer success",
+    ]
+
+    segment_keywords = [
+        "segment",
+        "contract",
+        "payment method",
+        "internet type",
+        "group",
+        "compare",
+        "highest churn rate",
+    ]
+
+    customer_keywords = [
+        "customer",
+        "customers",
+        "highest risk",
+        "top risk",
+        "critical risk",
+        "churn probability",
+        "risk tier",
+    ]
+
+    has_policy = any(
+        keyword in question
+        for keyword in policy_keywords
+    )
+
+    has_segment = any(
+        keyword in question
+        for keyword in segment_keywords
+    )
+
+    has_customer = any(
+        keyword in question
+        for keyword in customer_keywords
+    )
+
+    if has_policy and (
+        has_segment or has_customer
+    ):
+        route = "combined"
+
+    elif has_policy:
+        route = "policy"
+
+    elif has_segment:
+        route = "segment"
+
+    elif has_customer:
+        route = "customer"
+
+    else:
+        route = "combined"
+
+    state["route"] = route
+
+    return state
+def customer_route(
+    state: AgentState,
+) -> AgentState:
+
+    state["route"] = "customer"
+
+    return state
+
+
+def segment_route(
+    state: AgentState,
+) -> AgentState:
+
+    state["route"] = "segment"
+
+    return state
+
+
+def policy_route(
+    state: AgentState,
+) -> AgentState:
+
+    state["route"] = "policy"
+
+    return state
+
+
+def combined_route(
+    state: AgentState,
+) -> AgentState:
+
+    state["route"] = "combined"
+
+    return state
+
+def choose_route(
+    state: AgentState,
+) -> str:
+
+    return state["route"]
 
 
 def analyze_question(
@@ -223,13 +334,85 @@ def build_graph():
         AgentState
     )
 
+    # ---------------------------------
+    # Nodes
+    # ---------------------------------
+
+    graph.add_node(
+        "route_question",
+        route_question,
+    )
+
+    graph.add_node(
+        "customer_route",
+        customer_route,
+    )
+
+    graph.add_node(
+        "segment_route",
+        segment_route,
+    )
+
+    graph.add_node(
+        "policy_route",
+        policy_route,
+    )
+
+    graph.add_node(
+        "combined_route",
+        combined_route,
+    )
+
     graph.add_node(
         "analyze_question",
         analyze_question,
     )
 
+    # ---------------------------------
+    # Entry point
+    # ---------------------------------
+
     graph.set_entry_point(
-        "analyze_question"
+        "route_question"
+    )
+
+    # ---------------------------------
+    # Conditional routing
+    # ---------------------------------
+
+    graph.add_conditional_edges(
+        "route_question",
+        choose_route,
+        {
+            "customer": "customer_route",
+            "segment": "segment_route",
+            "policy": "policy_route",
+            "combined": "combined_route",
+        },
+    )
+
+    # ---------------------------------
+    # Route -> analysis
+    # ---------------------------------
+
+    graph.add_edge(
+        "customer_route",
+        "analyze_question",
+    )
+
+    graph.add_edge(
+        "segment_route",
+        "analyze_question",
+    )
+
+    graph.add_edge(
+        "policy_route",
+        "analyze_question",
+    )
+
+    graph.add_edge(
+        "combined_route",
+        "analyze_question",
     )
 
     graph.add_edge(
@@ -238,7 +421,6 @@ def build_graph():
     )
 
     return graph.compile()
-
 
 def main():
 
@@ -262,6 +444,13 @@ def main():
     print(
         result["answer"]
     )
+    print(
+    "\nROUTE:"
+)
+
+    print(
+        result["route"]
+)
 
 
 if __name__ == "__main__":

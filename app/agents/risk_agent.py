@@ -51,10 +51,6 @@ def route_question(
 
     question = state["question"].lower()
 
-    # ---------------------------------
-    # Policy indicators
-    # ---------------------------------
-
     policy_keywords = [
         "policy",
         "sla",
@@ -63,10 +59,6 @@ def route_question(
         "customer success",
         "retention action",
     ]
-
-    # ---------------------------------
-    # Segment analytics indicators
-    # ---------------------------------
 
     segment_keywords = [
         "segment",
@@ -77,10 +69,6 @@ def route_question(
         "compare",
         "highest churn rate",
     ]
-
-    # ---------------------------------
-    # Customer analytics indicators
-    # ---------------------------------
 
     customer_keywords = [
         "highest-risk customers",
@@ -106,10 +94,6 @@ def route_question(
         keyword in question
         for keyword in customer_keywords
     )
-
-    # ---------------------------------
-    # Route decision
-    # ---------------------------------
 
     if has_policy and (
         has_customer or has_segment
@@ -175,7 +159,7 @@ def combined_route(
 
 
 # =========================================================
-# CONDITIONAL ROUTE SELECTOR
+# ROUTE SELECTOR
 # =========================================================
 
 
@@ -310,38 +294,105 @@ Internet type analysis:
         "combined",
     ]:
 
-        retrieved_documents = retrieve_documents(
-            query=question,
-            limit=3,
+        retrieval_query = question
+
+        is_highest_risk_question = (
+            route == "combined"
+            and (
+                "highest-risk"
+                in question.lower()
+                or "highest risk"
+                in question.lower()
+            )
         )
+
+        if is_highest_risk_question:
+
+            retrieval_query = (
+                f"{question} "
+                "Critical Risk customers 80% or higher "
+                "required actions highest priority "
+                "retention policy"
+            )
+
+        retrieved_documents = (
+            retrieve_documents(
+                query=retrieval_query,
+                limit=8,
+            )
+        )
+
+        if is_highest_risk_question:
+
+            critical_documents = [
+                document
+                for document
+                in retrieved_documents
+                if (
+                    document[
+                        "section"
+                    ].lower()
+                    == "critical risk"
+                )
+            ]
+
+            other_documents = [
+                document
+                for document
+                in retrieved_documents
+                if (
+                    document[
+                        "section"
+                    ].lower()
+                    != "critical risk"
+                )
+            ]
+
+            retrieved_documents = (
+                critical_documents
+                + other_documents
+            )[:4]
+
+        else:
+
+            retrieved_documents = (
+                retrieved_documents[:4]
+            )
 
         rag_sections = []
 
-        for document in retrieved_documents:
+        for document in (
+            retrieved_documents
+        ):
 
             rag_sections.append(
-            (
-                 f"SOURCE: {document['source']}\n"
-                 f"SECTION: {document['section']}\n"
-                 f"CHUNK: {document['chunk_index']}\n"
-                 f"SIMILARITY: {document['similarity']}\n"
-                 f"{document['content']}"
+                (
+                    f"SOURCE: "
+                    f"{document['source']}\n"
+                    f"SECTION: "
+                    f"{document['section']}\n"
+                    f"CHUNK: "
+                    f"{document['chunk_index']}\n"
+                    f"SIMILARITY: "
+                    f"{document['similarity']}\n"
+                    f"{document['content']}"
+                )
             )
-        )
 
         rag_context = "\n\n".join(
             rag_sections
         )
 
-        
         source_names = [
-        (
-            f"{document['source']} | "
-            f"{document['section']} | "
-            f"chunk {document['chunk_index']}"
-        )
-        for document in retrieved_documents
-    ]
+            (
+                f"{document['source']} | "
+                f"{document['section']} | "
+                f"chunk "
+                f"{document['chunk_index']}"
+            )
+            for document
+            in retrieved_documents
+        ]
 
         policy_section = f"""
 RETRIEVED BUSINESS KNOWLEDGE
@@ -354,7 +405,7 @@ RETRIEVED BUSINESS KNOWLEDGE
         )
 
     # =====================================================
-    # 4. COMBINE ONLY REQUIRED CONTEXT
+    # 4. COMBINE REQUIRED CONTEXT
     # =====================================================
 
     combined_context = "\n\n".join(
@@ -401,11 +452,38 @@ If the question asks about company policies,
 SLA requirements, or retention procedures,
 use only the retrieved business knowledge.
 
-For retention prioritization, prioritize higher
-churn risk or predicted churn rate unless the
-supplied business policy says otherwise.
+For retention prioritization:
 
-Keep the response concise and business-friendly.
+- Prioritize Critical-risk customers before
+  High-risk customers.
+- Prioritize High-risk customers before
+  Medium-risk customers.
+- When segment analytics are relevant,
+  prioritize the segment with the highest
+  churn risk or predicted churn rate.
+- If retrieved business policy specifies a
+  different rule, follow the policy.
+- Do not recommend lower-risk groups ahead
+  of higher-risk groups unless the supplied
+  context clearly justifies it.
+
+Risk-tier terminology rules:
+
+- Preserve the exact risk-tier names from
+  the supplied context.
+- "Critical Risk" and "High Risk" are
+  different tiers.
+- Never call a Critical-risk customer
+  High-risk.
+- If the retrieved section is
+  "Critical Risk", explicitly say
+  "Critical-risk customers".
+- Critical Risk means churn probability of
+  80% or higher when that definition is
+  present in the supplied context.
+
+Keep the response concise and
+business-friendly.
 
 AVAILABLE CONTEXT
 
@@ -424,8 +502,13 @@ USER QUESTION
         prompt
     )
 
-    state["answer"] = response.content
-    state["sources"] = source_names
+    state["answer"] = (
+        response.content
+    )
+
+    state["sources"] = (
+        source_names
+    )
 
     return state
 
@@ -440,10 +523,6 @@ def build_graph():
     graph = StateGraph(
         AgentState
     )
-
-    # ---------------------------------
-    # Nodes
-    # ---------------------------------
 
     graph.add_node(
         "route_question",
@@ -475,32 +554,24 @@ def build_graph():
         analyze_question,
     )
 
-    # ---------------------------------
-    # Entry point
-    # ---------------------------------
-
     graph.set_entry_point(
         "route_question"
     )
-
-    # ---------------------------------
-    # Conditional routing
-    # ---------------------------------
 
     graph.add_conditional_edges(
         "route_question",
         choose_route,
         {
-            "customer": "customer_route",
-            "segment": "segment_route",
-            "policy": "policy_route",
-            "combined": "combined_route",
+            "customer":
+                "customer_route",
+            "segment":
+                "segment_route",
+            "policy":
+                "policy_route",
+            "combined":
+                "combined_route",
         },
     )
-
-    # ---------------------------------
-    # Route -> analysis
-    # ---------------------------------
 
     graph.add_edge(
         "customer_route",
@@ -541,10 +612,11 @@ def main():
 
     result = agent.invoke(
         {
-           "question": (
-              "What should we do for our "
-              "highest-risk customers "
-              "according to policy?"
+            "question": (
+                "What should we do "
+                "for our highest-risk "
+                "customers according "
+                "to policy?"
             ),
             "answer": "",
             "sources": [],
@@ -572,9 +644,12 @@ def main():
         "\nSOURCES:"
     )
 
-    print(
+    for source in (
         result["sources"]
-    )
+    ):
+        print(
+            f"- {source}"
+        )
 
 
 if __name__ == "__main__":

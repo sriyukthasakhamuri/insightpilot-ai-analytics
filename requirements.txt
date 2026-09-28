@@ -7,3 +7,5 @@ uvicorn
 langgraph
 langchain-core
 langchain-ollama
+streamlit
+requests

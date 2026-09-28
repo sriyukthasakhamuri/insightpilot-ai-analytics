@@ -33,9 +33,14 @@ This allows InsightPilot to use only the tools and context required for each que
 ## Application Preview
 
 ### Home
+
 ![InsightPilot Home](./docs/01_home.png)
 
+### Critical-Risk Policy Analysis
+
 ![Critical Risk Policy](./docs/02_critical_risk_policy.png)
+
+### Segment Analysis
 
 ![Segment Analysis](./docs/03_segment_analysis.png)
 
@@ -174,3 +179,453 @@ Example routes:
 
 "What should we do for our highest-risk customers according to policy?"
 → combined
+```
+
+The graph then routes the request to the appropriate analysis workflow.
+
+This prevents unnecessary tools from running for every question.
+
+---
+
+## Semantic RAG
+
+InsightPilot includes a business knowledge base containing:
+
+- retention policy
+- churn definitions
+- customer success playbook
+- support SLA
+
+Knowledge-base documents are split by Markdown section and further chunked when required.
+
+Each chunk includes metadata:
+
+- source document
+- section
+- chunk index
+- semantic similarity score
+
+Embeddings are generated locally using:
+
+```text
+nomic-embed-text
+```
+
+through Ollama.
+
+The retriever ranks chunks using cosine similarity and returns the most relevant business context to the agent.
+
+---
+
+## Grounded Policy Answers
+
+For policy and combined questions, the LLM is instructed to:
+
+- answer only from retrieved business knowledge
+- preserve exact risk-tier terminology
+- avoid inventing policies
+- avoid inventing customer metrics
+- distinguish Critical Risk from High Risk
+- prioritize Critical-risk customers before lower-risk groups
+- describe modeled relationships as associations rather than causes
+
+Retrieved source metadata is returned separately through the API and displayed in the Streamlit interface.
+
+Example source:
+
+```text
+retention_policy.md | Critical Risk | chunk 2
+```
+
+---
+
+## System Architecture
+
+```text
+                     ┌─────────────────────────┐
+                     │      Streamlit UI       │
+                     │   Business Questions    │
+                     └────────────┬────────────┘
+                                  │
+                                  ▼
+                     ┌─────────────────────────┐
+                     │       FastAPI API       │
+                     │       POST /ask         │
+                     └────────────┬────────────┘
+                                  │
+                                  ▼
+                     ┌─────────────────────────┐
+                     │     LangGraph Router    │
+                     └────────────┬────────────┘
+                                  │
+             ┌────────────────────┼────────────────────┐
+             │                    │                    │
+             ▼                    ▼                    ▼
+    ┌────────────────┐   ┌────────────────┐   ┌────────────────┐
+    │ Customer Risk  │   │ Segment        │   │ Policy / RAG   │
+    │ Analytics      │   │ Analytics      │   │ Retrieval      │
+    └────────┬───────┘   └────────┬───────┘   └────────┬───────┘
+             │                    │                    │
+             └────────────────────┼────────────────────┘
+                                  │
+                                  ▼
+                     ┌─────────────────────────┐
+                     │      Ollama LLM         │
+                     │      llama3.2:3b        │
+                     └────────────┬────────────┘
+                                  │
+                                  ▼
+                     ┌─────────────────────────┐
+                     │ Grounded Business Answer│
+                     │ + Retrieved Sources     │
+                     └─────────────────────────┘
+```
+
+---
+
+## Tech Stack
+
+### AI / Agentic AI
+
+- LangGraph
+- LangChain Core
+- Ollama
+- llama3.2:3b
+- nomic-embed-text
+- semantic RAG
+
+### Machine Learning
+
+- Python
+- pandas
+- NumPy
+- scikit-learn
+- joblib
+- logistic regression
+- feature engineering
+- explainability
+
+### Backend
+
+- FastAPI
+- Uvicorn
+- REST API
+
+### Frontend
+
+- Streamlit
+
+### Data
+
+- IBM Telco Customer Churn dataset
+- Excel
+- CSV
+- Customer 360 analytics pipeline
+
+### Version Control
+
+- Git
+- GitHub
+
+---
+
+## Project Structure
+
+```text
+insightpilot-ai-analytics/
+│
+├── app/
+│   ├── agents/
+│   │   ├── customer_risk_tools.py
+│   │   ├── risk_agent.py
+│   │   └── segment_analysis_tools.py
+│   │
+│   ├── api/
+│   │   └── main.py
+│   │
+│   ├── ml/
+│   │   ├── train_churn_model.py
+│   │   ├── explain_churn_model.py
+│   │   └── score_customers.py
+│   │
+│   ├── rag/
+│   │   └── retrieval_service.py
+│   │
+│   ├── services/
+│   │   ├── profile_telco_data.py
+│   │   ├── build_customer_360.py
+│   │   └── build_churn_features.py
+│   │
+│   └── ui/
+│       ├── __init__.py
+│       └── streamlit_app.py
+│
+├── data/
+│   ├── raw/
+│   └── processed/
+│
+├── docs/
+│   ├── knowledge_base/
+│   │   ├── churn_definitions.md
+│   │   ├── customer_success_playbook.md
+│   │   ├── retention_policy.md
+│   │   └── support_sla.md
+│   │
+│   ├── 01_home.png
+│   ├── 02_critical_risk_policy.png
+│   └── 03_segment_analysis.png
+│
+├── models/
+├── notebooks/
+├── sql/
+├── tests/
+├── requirements.txt
+├── .gitignore
+├── .env.example
+└── README.md
+```
+
+---
+
+## API Endpoints
+
+### Health Check
+
+```http
+GET /health
+```
+
+### Customer Risk
+
+```http
+GET /customers/{customer_id}/risk
+```
+
+Example response:
+
+```json
+{
+  "customer_id": "8775-LHDJH",
+  "churn_probability_pct": 98.98,
+  "risk_tier": "Critical",
+  "predicted_churn": 1
+}
+```
+
+### Ask InsightPilot
+
+```http
+POST /ask
+```
+
+Example request:
+
+```json
+{
+  "question": "What should we do for our highest-risk customers according to policy?"
+}
+```
+
+Example response structure:
+
+```json
+{
+  "question": "What should we do for our highest-risk customers according to policy?",
+  "answer": "Grounded business response...",
+  "sources": [
+    "retention_policy.md | Critical Risk | chunk 2"
+  ],
+  "source_count": 1
+}
+```
+
+---
+
+## Local Setup
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/sriyukthasakhamuri/insightpilot-ai-analytics.git
+```
+
+```bash
+cd insightpilot-ai-analytics
+```
+
+### 2. Create a virtual environment
+
+```bash
+python -m venv .venv
+```
+
+Activate it on macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+### 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Install Ollama models
+
+```bash
+ollama pull llama3.2:3b
+```
+
+```bash
+ollama pull nomic-embed-text
+```
+
+Confirm:
+
+```bash
+ollama list
+```
+
+### 5. Start FastAPI
+
+```bash
+uvicorn app.api.main:app --reload
+```
+
+API documentation:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+### 6. Start Streamlit
+
+Open a second terminal and activate the virtual environment:
+
+```bash
+source .venv/bin/activate
+```
+
+Then run:
+
+```bash
+streamlit run app/ui/streamlit_app.py
+```
+
+Open:
+
+```text
+http://localhost:8501
+```
+
+---
+
+## Example Questions
+
+Try asking:
+
+```text
+Who are the highest-risk customers?
+```
+
+```text
+Which contract segment has the highest churn risk?
+```
+
+```text
+What does our SLA say about Critical-risk customers?
+```
+
+```text
+What should we do for our highest-risk customers according to policy?
+```
+
+---
+
+## Business Value
+
+InsightPilot demonstrates how traditional analytics and modern AI can work together.
+
+Instead of using an LLM as an isolated chatbot, the application combines:
+
+- predictive churn modeling
+- customer-level risk scoring
+- segment-level analytics
+- business policy retrieval
+- question routing
+- grounded natural-language generation
+
+This allows business users to move from:
+
+```text
+"What happened?"
+```
+
+to:
+
+```text
+"Who is at risk?"
+```
+
+to:
+
+```text
+"Why does the model consider them risky?"
+```
+
+to:
+
+```text
+"What should the business do next?"
+```
+
+---
+
+## Project Highlights
+
+- Built an end-to-end Customer 360 analytics pipeline
+- Developed a leakage-controlled churn prediction model
+- Scored 7,000+ customers by churn probability and risk tier
+- Added model explainability
+- Built segment-level churn analytics
+- Created FastAPI endpoints for customer intelligence
+- Built a LangGraph-based routing agent
+- Integrated local LLM inference with Ollama
+- Implemented chunked semantic RAG using local embeddings
+- Added policy-grounded answers with source metadata
+- Built a Streamlit business-user interface
+- Added route-specific execution to reduce unnecessary processing
+
+---
+
+## Future Improvements
+
+Potential extensions include:
+
+- persistent vector database such as Chroma or FAISS
+- embedding caching
+- automated RAG evaluation
+- LangSmith or OpenTelemetry tracing
+- conversation history
+- customer lookup by ID from the UI
+- interactive charts
+- authentication
+- Docker Compose
+- cloud deployment
+- automated tests
+- CI/CD
+
+---
+
+## Author
+
+Built as an AI Analytics Engineering portfolio project demonstrating:
+
+**Machine Learning + Analytics Engineering + Agentic AI + RAG + APIs + Business Intelligence**
+
+---
+
+## License
+
+This project is intended for educational and portfolio use.

@@ -320,22 +320,28 @@ Internet type analysis:
         for document in retrieved_documents:
 
             rag_sections.append(
-                (
-                    f"SOURCE: {document['source']}\n"
-                    f"SIMILARITY: "
-                    f"{document['similarity']}\n"
-                    f"{document['content']}"
-                )
+            (
+                 f"SOURCE: {document['source']}\n"
+                 f"SECTION: {document['section']}\n"
+                 f"CHUNK: {document['chunk_index']}\n"
+                 f"SIMILARITY: {document['similarity']}\n"
+                 f"{document['content']}"
             )
+        )
 
         rag_context = "\n\n".join(
             rag_sections
         )
 
+        
         source_names = [
-            document["source"]
-            for document in retrieved_documents
-        ]
+        (
+            f"{document['source']} | "
+            f"{document['section']} | "
+            f"chunk {document['chunk_index']}"
+        )
+        for document in retrieved_documents
+    ]
 
         policy_section = f"""
 RETRIEVED BUSINESS KNOWLEDGE
